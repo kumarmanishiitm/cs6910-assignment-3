@@ -5,7 +5,9 @@ Assignment 3 submitted by Manish Kumar (cs21m033) and Vishal Yadav (cs21m073)
 1. import q1_final.py file into your colab notebook.
 2. import the dataset into your colab notebook.
 3. Run the below command to execute the file
+   ```python
 	!python <filename> <type_layer> <encoder_layer> <decoder_layer> <units> <dropout> <attention> <embedding_dim> <beam_search>	
+	```
 	eg: !python q1_final.py lstm 3 3 256 0.11 True 256 False
 
 *************************************************************************
