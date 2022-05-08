@@ -30,6 +30,7 @@ def model_layer_type(name, units, dropout, return_state=False, return_sequences=
     elif name == 'lstm':
       temp = layers.LSTM(units=units, dropout=dropout, return_state=return_state, return_sequences=return_sequences)
     return temp
+###############################################################################
 
 def create_layer_for_Enc(no_of_layer, layer_type, units, dropout):
   temp = []
@@ -57,7 +58,7 @@ class Encoder(tf.keras.Model):
         temp = self.rnn_layers[1:]
         for layer in temp:
             x = layer(x)
-        return x[0], x[1:]
+        return x[0], x[1:]  #returning enc output and enc state
 ################################################################################   
 def create_layer_for_Dec(no_of_layer, layer_type, units, dropout):
   temp = [] 
@@ -90,13 +91,12 @@ class Decoder(tf.keras.Model):
         temp = self.rnn_layers[1:]
         for layer in temp:
             x = layer(x)
-        return self.dense(self.flatten(x[0])), x[1:], None
+        return self.dense(self.flatten(x[0])), x[1:], None # returning dec pred and dec state
 ################################################################################
 
 #####################  SEQ 2 SEQ MODEL##########################################
 class Seq2SeqModel():
-    def __init__(self, embedding_dim, encoder_layers, decoder_layers, layer_type, units, dropout, loss, optimizer, metric, attention=False):
-        
+    def __init__(self, embedding_dim, encoder_layers, decoder_layers, layer_type, units, dropout, loss, optimizer, metric, attention=False):        
         self.layer_type = layer_type
         self.encoder_layers = encoder_layers
         self.stats = []
@@ -111,7 +111,10 @@ class Seq2SeqModel():
         self.metric = metric
     
     def create_model(self):
+    	#making object of Encoder class with appropiate params
         self.encoder = Encoder(self.layer_type, self.encoder_layers, self.units, len(self.input_tokenizer.word_index) + 1, self.embedding_dim, self.dropout)
+        
+        #making object of Decoder class with appropiate params
         self.decoder = Decoder(self.layer_type, self.decoder_layers, self.units, len(self.targ_tokenizer.word_index) + 1, self.embedding_dim,  self.dropout, self.attention)
 
   
@@ -135,7 +138,8 @@ class Seq2SeqModel():
 
             gradients = tape.gradient(loss, self.encoder.variables + self.decoder.variables)
             self.optimizer.apply_gradients(zip(gradients, self.encoder.variables + self.decoder.variables))
-        return loss / target.shape[1], self.metric.result()  #return batch_loss
+        return loss / target.shape[1], self.metric.result()  #return batch_loss and metric for training
+        
    
     def validation_step(self, input, target, enc_state):
         loss = 0  
@@ -147,7 +151,7 @@ class Seq2SeqModel():
             self.metric.update_state(target[:,t+1], preds)
             preds = tf.argmax(preds, 1)
             dec_input = tf.expand_dims(preds, 1)        
-        return loss / target.shape[1], self.metric.result() #returning batch_size
+        return loss / target.shape[1], self.metric.result() #returning batch_size and metric for validation
 
 
     def fit(self, dataset, val_dataset, batch_size=128, epochs=10, use_wandb=False, teacher_forcing_ratio=1.0):
@@ -211,13 +215,13 @@ class Seq2SeqModel():
             print(f"\nTrain Loss: {avg_loss} Train Accuracy: {avg_acc*100} Validation Loss: { total_val_loss / steps_per_epoch_val} Validation Accuracy: {(total_val_acc / steps_per_epoch_val)*100}")           
           
         print("\nOur Model trained successfully.....")
-        
+
+#############################################################################################################        
 def Train_Model(language,type_layer,encoder_layers,decoder_layers,units,dropout,attention,embedding_dim,test_beam_search=False):
-    ## 1. Our Language ##
+    #Language
     TRAIN_TSV, VAL_TSV, TEST_TSV = creating_data(language)
 
-    ## 2. data proccessed ##
-
+    #Preprocessing the data
     dataframe = pd.read_csv(TRAIN_TSV, sep="\t", header=None)
     def add_tokens(s, sos="\t", eos="\n"):  
         return sos + str(s) + eos    
@@ -259,10 +263,14 @@ def Train_Model(language,type_layer,encoder_layers,decoder_layers,units,dropout,
     targ_lang_tensor = lang_tensor
     val_dataset = tf.data.Dataset.from_tensor_slices((input_lang_tensor, targ_lang_tensor))
     val_dataset = dataset.shuffle(len(val_dataset))
+    
+    #model building by calling Sqe2seqModel class with appropiate arguments
     model = Seq2SeqModel(embedding_dim,encoder_layers, decoder_layers,type_layer,units,dropout,loss=tf.keras.losses.SparseCategoricalCrossentropy(),optimizer = tf.keras.optimizers.Adam(),metric = tf.keras.metrics.SparseCategoricalAccuracy(), attention=False)                                                                                                                                                                                                                          
     model.input_tokenizer = input_tokenizer
     model.targ_tokenizer = targ_tokenizer
-    model.create_model()   
+    model.create_model()  
+    
+    #Fitting our model 
     model.fit(dataset, val_dataset, epochs=10, use_wandb=True, teacher_forcing_ratio=1.0)
 #Train_Model("hi", test_beam_search=False)
 
@@ -276,7 +284,10 @@ def Train_Model(language,type_layer,encoder_layers,decoder_layers,units,dropout,
 #attention=False
 #test_beam_search=False
 #Train_Model("hi",type_layer,encoder_layers,decoder_layers,units,dropout,attention,embedding_dim,test_beam_search)
+############################################################################################################################
 
+
+##################################### CODE FOR COMMAND LINE#################################################################
 from sys import argv
 
 if __name__ == "__main__":
@@ -301,3 +312,4 @@ if __name__ == "__main__":
       test_beam_search=False
 
     Train_Model("hi",type_layer,encoder_layers,decoder_layers,units,dropout,attention,embedding_dim,test_beam_search)
+############################################################################################################################
