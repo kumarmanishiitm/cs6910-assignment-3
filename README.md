@@ -74,3 +74,4 @@ for word in test_words:
 ```
 6. Question 8 is at the bottom of the notebook. To execute the code for question 8, run the code cell by cell.
 
+Link to the song lyrics: https://github.com/kumarmanishiitm/cs6910-assignment-3/blob/main/genius_hip_hop_lyrics.csv
