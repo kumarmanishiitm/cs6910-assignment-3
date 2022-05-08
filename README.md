@@ -16,7 +16,9 @@ Assignment 3 submitted by Manish Kumar (cs21m033) and Vishal Yadav (cs21m073)
 
 1. Run the notebook cell by cell.
 2. To run model on test data the followin code executed
-		model = Test_Model(lang="hi",embed_dim=256,enc_layers=3,dec_layers=3,type_layer="lstm",units=256,dropout=0.2,attention=True)                                                                                                                                                          
+	```python
+		model = Test_Model(lang="hi",embed_dim=256,enc_layers=3,dec_layers=3,type_layer="lstm",units=256,dropout=0.2,attention=True)     
+	```
 
 3. To run the model with WandB sweep, use the following code:
 ```python
