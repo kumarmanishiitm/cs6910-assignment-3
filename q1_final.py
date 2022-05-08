@@ -17,13 +17,12 @@ import tensorflow.keras.backend as K
 
 
 
+########################### CREATING DATASET ###################################
 def creating_data(language,path = "/content/drive/MyDrive/dakshina_dataset_v1.0/{}/lexicons/{}.translit.sampled.{}.tsv"):
-    
-    val_tsv = path.format(language, language, "dev")
-    test_tsv = path.format(language, language, "test")
-    train_tsv = path.format(language, language, "train")
-    return train_tsv, val_tsv, test_tsv
+    #returning train tsv, val tsv, test tsv
+    return path.format(language, language, "train"), path.format(language, language, "dev"), path.format(language, language, "test")
 
+#########################  LAYER TYPE ##########################################
 def model_layer_type(name, units, dropout, return_state=False, return_sequences=False):
     temp = layers.GRU(units=units, dropout=dropout, return_state=return_state, return_sequences=return_sequences)    
     if name=="rnn":
@@ -38,26 +37,28 @@ def create_layer_for_Enc(no_of_layer, layer_type, units, dropout):
     ly = model_layer_type(layer_type, units, dropout, return_state=True, return_sequences=True)
     temp.append(ly)
   return temp
-
+############################## ENCODER #########################################
 class Encoder(tf.keras.Model):
     def __init__(self, layer_type, n_layers, units, encoder_vocab_size, embedding_dim, dropout):
         super(Encoder, self).__init__()
-        self.layer_type = layer_type
+        self.embedding = tf.keras.layers.Embedding(encoder_vocab_size, embedding_dim)
         self.dropout = dropout
         self.n_layers = n_layers
         self.units = units
+        self.layer_type = layer_type
         self.rnn_layers = create_layer_for_Enc(self.n_layers, self.layer_type, self.units, self.dropout)
-        self.embedding = tf.keras.layers.Embedding(encoder_vocab_size, embedding_dim)
-        
         
     def call(self, x, hidden):
+      pass
+        
+    def Enc_out_state(self, x, hidden):
         x = self.embedding(x)
         x = self.rnn_layers[0](x, initial_state=hidden)
         temp = self.rnn_layers[1:]
         for layer in temp:
             x = layer(x)
         return x[0], x[1:]
-    
+################################################################################   
 def create_layer_for_Dec(no_of_layer, layer_type, units, dropout):
   temp = [] 
   for i in range(no_of_layer):            
@@ -67,30 +68,32 @@ def create_layer_for_Dec(no_of_layer, layer_type, units, dropout):
       ly = model_layer_type(layer_type, units, dropout,return_sequences=True,return_state=True)
     temp.append(ly)
   return temp
-
+####################  DECODER ##################################################
 class Decoder(tf.keras.Model):
     def __init__(self, layer_type, n_layers, units, decoder_vocab_size, embedding_dim, dropout, attention=False):
         super(Decoder, self).__init__()
+        self.dense = layers.Dense(decoder_vocab_size, activation="softmax") 
         self.n_layers = n_layers
         self.units = units
-        self.attention = attention
-        self.dense = layers.Dense(decoder_vocab_size, activation="softmax")        
         self.layer_type = layer_type
         self.dropout = dropout
         self.flatten = layers.Flatten() 
         self.rnn_layers = create_layer_for_Dec(self.n_layers, self.layer_type, self.units, self.dropout)
-        self.embedding_layer = layers.Embedding(input_dim=decoder_vocab_size,output_dim=embedding_dim)      
+        self.embedding_layer = layers.Embedding(input_dim=decoder_vocab_size,output_dim=embedding_dim)   
+        self.attention = attention
 
-    def call(self, x, hidden, enc_out=None):
-        
+    def call(self, x, hidden, enc_out=None): pass
+
+    def Dec_pred_state(self, x, hidden, enc_out=None):        
         x = self.embedding_layer(x)
         x = self.rnn_layers[0](x, initial_state=hidden)
         temp = self.rnn_layers[1:]
         for layer in temp:
             x = layer(x)
         return self.dense(self.flatten(x[0])), x[1:], None
-    
+################################################################################
 
+#####################  SEQ 2 SEQ MODEL##########################################
 class Seq2SeqModel():
     def __init__(self, embedding_dim, encoder_layers, decoder_layers, layer_type, units, dropout, loss, optimizer, metric, attention=False):
         
@@ -108,80 +111,58 @@ class Seq2SeqModel():
         self.metric = metric
     
     def create_model(self):
+        self.encoder = Encoder(self.layer_type, self.encoder_layers, self.units, len(self.input_tokenizer.word_index) + 1, self.embedding_dim, self.dropout)
+        self.decoder = Decoder(self.layer_type, self.decoder_layers, self.units, len(self.targ_tokenizer.word_index) + 1, self.embedding_dim,  self.dropout, self.attention)
 
-        encoder_vocab_size = len(self.input_tokenizer.word_index) + 1
-        decoder_vocab_size = len(self.targ_tokenizer.word_index) + 1
-
-        self.encoder = Encoder(self.layer_type, self.encoder_layers, self.units, encoder_vocab_size,
-                               self.embedding_dim, self.dropout)
-
-        self.decoder = Decoder(self.layer_type, self.decoder_layers, self.units, decoder_vocab_size,
-                               self.embedding_dim,  self.dropout, self.attention)
-
-    @tf.function
+  
     def train_step(self, input, target, enc_state):
-
         loss = 0 
-
         with tf.GradientTape() as tape: 
+            enc_out, enc_state = self.encoder.Enc_out_state(input, enc_state)
+            dec_input, dec_state = tf.expand_dims([self.targ_tokenizer.word_index["\t"]]*self.batch_size ,1), enc_state
+            for t in range(target.shape[1]-1):
+                    x = t+1
+                    preds, dec_state, _ = self.decoder.Dec_pred_state(dec_input, dec_state, enc_out)
+                    self.metric.update_state(target[:,x], preds)
+                    loss = loss + self.loss(target[:,x], preds)                    
+                    dec_input = tf.expand_dims(target[:,x], 1) 
 
-            enc_out, enc_state = self.encoder(input, enc_state)
-
-            dec_state = enc_state
-            dec_input = tf.expand_dims([self.targ_tokenizer.word_index["\t"]]*self.batch_size ,1)
-
-            ## We use Teacher forcing to train the network
-            ## Each target at timestep t is passed as input for timestep t + 1
-
-            if random.random() < self.teacher_forcing_ratio:
-
-                for t in range(1, target.shape[1]):
-
-                    preds, dec_state, _ = self.decoder(dec_input, dec_state, enc_out)
-                    loss += self.loss(target[:,t], preds)
-                    self.metric.update_state(target[:,t], preds)
-                    
-                    dec_input = tf.expand_dims(target[:,t], 1)         
+            if random.random() < self.teacher_forcing_ratio:    
+               pass
             else:
-                for t in range(1, target.shape[1]):
-                    preds, dec_state, _ = self.decoder(dec_input, dec_state, enc_out)
-                    loss += self.loss(target[:,t], preds)
-                    self.metric.update_state(target[:,t], preds)
+                preds = tf.argmax(preds, 1)
+                dec_input = tf.expand_dims(preds, 1)
 
-                    preds = tf.argmax(preds, 1)
-                    dec_input = tf.expand_dims(preds, 1)
-            batch_loss = loss / target.shape[1]
-            variables = self.encoder.variables + self.decoder.variables
-            gradients = tape.gradient(loss, variables)
-            self.optimizer.apply_gradients(zip(gradients, variables))
-        return batch_loss, self.metric.result()
-    @tf.function
+            gradients = tape.gradient(loss, self.encoder.variables + self.decoder.variables)
+            self.optimizer.apply_gradients(zip(gradients, self.encoder.variables + self.decoder.variables))
+        return loss / target.shape[1], self.metric.result()  #return batch_loss
+   
     def validation_step(self, input, target, enc_state):
         loss = 0  
-        enc_out, enc_state = self.encoder(input, enc_state)
-        dec_state = enc_state
-        dec_input = tf.expand_dims([self.targ_tokenizer.word_index["\t"]]*self.batch_size ,1)
-        for t in range(1, target.shape[1]):
-            preds, dec_state, _ = self.decoder(dec_input, dec_state, enc_out)
-            loss += self.loss(target[:,t], preds)
-            self.metric.update_state(target[:,t], preds)
-
+        enc_out, enc_state = self.encoder.Enc_out_state(input, enc_state)
+        dec_input, dec_state = tf.expand_dims([self.targ_tokenizer.word_index["\t"]]*self.batch_size ,1), enc_state
+        for t in range(target.shape[1]-1):
+            preds, dec_state, _ = self.decoder.Dec_pred_state(dec_input, dec_state, enc_out)
+            loss = loss + self.loss(target[:,t+1], preds)
+            self.metric.update_state(target[:,t+1], preds)
             preds = tf.argmax(preds, 1)
-            dec_input = tf.expand_dims(preds, 1)
+            dec_input = tf.expand_dims(preds, 1)        
+        return loss / target.shape[1], self.metric.result() #returning batch_size
 
-        batch_loss = loss / target.shape[1]
-        
-        return batch_loss, self.metric.result()
+
     def fit(self, dataset, val_dataset, batch_size=128, epochs=10, use_wandb=False, teacher_forcing_ratio=1.0):
-        self.batch_size = batch_size
-        self.teacher_forcing_ratio = teacher_forcing_ratio
+        
+        self.batch_size = batch_size        
         steps_per_epoch = len(dataset) // self.batch_size
-        steps_per_epoch_val = len(val_dataset) // self.batch_size
         dataset = dataset.batch(self.batch_size, drop_remainder=True)
-        val_dataset = val_dataset.batch(self.batch_size, drop_remainder=True)
         sample_inp, sample_targ = next(iter(dataset))
-        self.max_target_len = sample_targ.shape[1]
-        self.max_input_len = sample_inp.shape[1]
+        steps_per_epoch_val = len(val_dataset) // self.batch_size        
+        val_dataset = val_dataset.batch(self.batch_size, drop_remainder=True)
+
+        
+        self.max_input_len, self.max_target_len = sample_inp.shape[1],sample_targ.shape[1]
+        self.teacher_forcing_ratio = teacher_forcing_ratio
+       
         print("------------------------------------------------------------------------------------------------------------------------------------------")
         for epoch in range(1, epochs+1):
             print(f"Epoch {epoch}\n")
@@ -195,21 +176,22 @@ class Seq2SeqModel():
               enc_state = [tf.zeros((batch_size, self.units))]
             else:
               enc_state = [tf.zeros((batch_size, self.units))]*2      
+
+
             print("Training ...\n")
             for batch, (input, target) in enumerate(dataset.take(steps_per_epoch)):
-                batch_loss, acc = self.train_step(input, target, enc_state)
-                total_loss += batch_loss
-                total_acc += acc
+                loss, acc = self.train_step(input, target, enc_state)
+                total_loss = total_loss + loss
+                total_acc = total_acc + acc
+                                
+                if (batch+1) % 100 == 0:
+                    print(f"Batch {batch+1} Loss {loss:.4f}")
+                if batch==0:
+                    print(f"Batch {batch+1} Loss {loss:.4f}")  
 
-
-                if batch==0 or ((batch + 1) % 100 == 0):
-                    print(f"Batch {batch+1} Loss {batch_loss:.4f}")
 
             avg_acc = total_acc / steps_per_epoch
-            avg_loss = total_loss / steps_per_epoch
-
-            total_val_acc = 0
-            total_val_loss = 0
+            avg_loss = total_loss / steps_per_epoch           
             
             self.metric.reset_states()
 
@@ -218,21 +200,18 @@ class Seq2SeqModel():
             else:
               enc_state = [tf.zeros((batch_size, self.units))]*2
 
+            total_val_acc = 0
+            total_val_loss = 0
             print("\nValidating ...")
             for batch, (input, target) in enumerate(val_dataset.take(steps_per_epoch_val)):
-                batch_loss, acc = self.validation_step(input, target, enc_state)
-                total_val_loss += batch_loss
-                total_val_acc += acc
+                loss, acc = self.validation_step(input, target, enc_state)
+                total_val_loss = total_val_loss + loss
+                total_val_acc = total_val_acc + acc
 
-            avg_val_acc = total_val_acc / steps_per_epoch_val
-            avg_val_loss = total_val_loss / steps_per_epoch_val
-
-            print(f"\nTrain Loss: {avg_loss} Train Accuracy: {avg_acc*100} Validation Loss: { avg_val_loss} Validation Accuracy: {avg_val_acc*100}")           
+            print(f"\nTrain Loss: {avg_loss} Train Accuracy: {avg_acc*100} Validation Loss: { total_val_loss / steps_per_epoch_val} Validation Accuracy: {(total_val_acc / steps_per_epoch_val)*100}")           
           
         print("\nOur Model trained successfully.....")
- 
-
-
+        
 def Train_Model(language,type_layer,encoder_layers,decoder_layers,units,dropout,attention,embedding_dim,test_beam_search=False):
     ## 1. Our Language ##
     TRAIN_TSV, VAL_TSV, TEST_TSV = creating_data(language)
